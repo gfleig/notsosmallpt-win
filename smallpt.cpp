@@ -6,13 +6,29 @@
 #include <math.h>   
 #include <stdio.h>  
 #include <stdlib.h> 
+#include <random>
+#include <omp.h>
 
 #define M_PI 3.1415926535897932384626433832795 // *** Added for VS2012
 
-// *** Added for VS2012
-double erand48(unsigned short seed[3]) {
-  return (double)rand() / (double)RAND_MAX;
-} 
+struct TMyRand {
+  TMyRand() : distribution_(0.0,1.0) {
+    int num_threads = std::max(1, omp_get_max_threads());
+    for (int thread_id = 0; thread_id < num_threads; ++thread_id) {
+      auto seed = std::random_device()() + thread_id;
+      engines_.push_back(std::mt19937(seed));
+    }
+  }
+
+  double operator()() {
+    return distribution_(engines_[omp_get_thread_num()]);
+  }
+
+  std::vector<std::mt19937> engines_;
+  std::uniform_real_distribution<double> distribution_;
+};
+
+TMyRand MyRand;
 
 struct Vec {      
   double x, y, z; // position, also color (r,g,b)
@@ -172,7 +188,7 @@ Vec radiance(const Ray &r, int depth, unsigned short *Xi) {
   }
     
   if (++depth > 5) {
-    if (erand48(Xi) < p) {
+    if (/* erand48(Xi) */ MyRand() < p) {
       f = f * (1 / p);
     } else {
       return obj.e;       // R.R.
@@ -180,8 +196,8 @@ Vec radiance(const Ray &r, int depth, unsigned short *Xi) {
   }
 
   if (obj.refl == DIFF) {                                                         // Ideal DIFFUSE reflection
-    double r1 = 2 * M_PI * erand48(Xi);
-    double r2 = erand48(Xi);
+    double r1 = 2 * M_PI * MyRand();    /* erand48(Xi) */
+    double r2 = MyRand();               /* erand48(Xi) */
     double r2s = sqrt(r2);
 
     Vec w = nl;
@@ -230,7 +246,7 @@ Vec radiance(const Ray &r, int depth, unsigned short *Xi) {
 
     return obj.e +
          f.mult(depth > 2
-                    ? (erand48(Xi) < P  // Russian roulette
+                    ? (MyRand() < P  // Russian roulette                  /* erand48(Xi) */
                                     ? radiance(reflRay, depth, Xi) * RP
                                     : radiance(Ray(x, tdir), depth, Xi) * TP)
                     : radiance(reflRay,      depth, Xi) * Re + 
@@ -259,9 +275,9 @@ int main(int argc, char *argv[]) {
       for (int sy = 0, i = (h - y - 1) * w + x; sy < 2; sy++) { // 2x2 subpixel rows
         for (int sx = 0; sx < 2; sx++, r = Vec()) {             // 2x2 subpixel cols
           for (int s = 0; s < samps; s++) {
-            double r1 = 2 * erand48(Xi);                        //subpixel variation
+            double r1 = 2 * MyRand();                        //subpixel variation /* erand48(Xi) */
             double dx = r1 < 1 ? sqrt(r1) - 1 : 1 - sqrt(2 - r1);
-            double r2 = 2 * erand48(Xi);
+            double r2 = 2 * MyRand();                     /* erand48(Xi) */
             double dy = r2 < 1 ? sqrt(r2) - 1 : 1 - sqrt(2 - r2);
 
             Vec d = cx * (((sx + .5 + dx) / 2 + x) / w - .5) +
